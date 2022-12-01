@@ -9,10 +9,27 @@ const char *monthName[12] = {
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
 
+void stripRollingRainbow(void);
+void stripStaticRainbow(void);
+void stripCircleRainbow(void);
+void stripPulseRainbow(void);
+void stripArrowDots(void);
+void stripArrowOverlap(void);
+void stripArrowDotsSec(void);
+void stripArrowOverlapSec(void);
+void stripStaticRED(void);
+
+int (*ledAction[10])(void);
+
 tmElements_t tm;
 
 int eepromAddr = 0;
-int ledMode = 0;
+byte ledMode = 0;
+byte hsvMode = 0;
+byte hourAlarmMode = 0;
+byte alarm_hours = 0;
+byte alarm_minutes = 0;
+byte counter = 0;
 
 // пример работы с лентой
 #define LED_PIN 4   // пин ленты
@@ -38,10 +55,24 @@ int8_t DispMSG[] = { 1, 2, 3, 4 };  // Настройка символов дл�
 //передаём номера пинов подключения
 TM1637 tm1637(CLK, DIO);
 void setup() {
+
+  ledAction[0] = stripRollingRainbow;
+  ledAction[1] = stripStaticRainbow;
+  ledAction[2] = stripCircleRainbow;
+  ledAction[3] = stripPulseRainbow;
+  ledAction[4] = stripArrowDots;
+  ledAction[5] = stripArrowOverlap;
+  ledAction[6] = stripArrowDotsSec;
+  ledAction[7] = stripArrowOverlapSec;
+  ledAction[8] = stripStaticCustom;
+  ledAction[9] = stripPulseCustom;
+
   ledMode = EEPROM.read(eepromAddr);
-  ledMode = 6;
+  hsvMode = EEPROM.read(eepromAddr+1);
+  ledMode = 8;
   Serial.begin(9600);
-  while (!Serial) ; // wait for Arduino Serial Monitor
+  while (!Serial)
+    ;  // wait for Arduino Serial Monitor
   delay(200);
   //EEPROM.write(eepromAddr,1);
   /*bool parse=false;
@@ -93,7 +124,7 @@ void setup() {
   tm1637.display(DispMSG);
 }
 void loop() {
-  static byte counter = 0;
+
   static byte dots_counter = 0;
 
   //Задержка
@@ -103,32 +134,11 @@ void loop() {
   dots_counter += 1;
   // if ledMode is 0 - leds are disabled
   if (ledMode) {
-    fsmTick(counter);
+    //fsmTick(counter);
+    (*ledAction[ledMode - 1])();
     strip.show();
   }
-
-#if 0
-  if (DispMSG[3] == 9) {
-    DispMSG[3] = 0;
-    if (DispMSG[2] == 5) {
-      DispMSG[2] = 0;
-        if (DispMSG[1] == 9 && DispMSG[0] < 2) {
-          DispMSG[1] = 0;
-          DispMSG[0] += 1;
-        } else if (DispMSG[1] == 3 && DispMSG[0] == 2) {
-          DispMSG[1] = 0;
-          DispMSG[0] = 0;
-        } else {
-          DispMSG[1] += 1;
-        }
-    } else {
-      DispMSG[2] += 1;
-    }
-  } else {
-    DispMSG[3] += 1;
-  }
-#endif
-  if (dots_counter > 250) {
+  if (dots_counter > 50) {
     dots_counter = 0;
     if (RTC.read(tm)) {
 
@@ -147,10 +157,10 @@ void loop() {
       }
       tm1637.display(DispMSG);
 
-    Serial.print("Ok, Time = ");
-    print2digits(ledMode);
-    Serial.println();
-    /*Serial.write(':');
+      //Serial.print("Ok, getTime at counter = ");
+      //Serial.print(counter);
+      //Serial.println();
+      /*Serial.write(':');
     print2digits(tm.Minute);
     Serial.write(':');
     print2digits(tm.Second);
@@ -163,108 +173,122 @@ void loop() {
     Serial.println();*/
     } else {
       if (RTC.chipPresent()) {
-        //Serial.println("The DS1307 is stopped.  Please run the SetTime");
+        Serial.println("The DS1307 is stopped.  Please run the SetTime");
       } else {
-        //Serial.println("DS1307 read error!  Please check the circuitry.");
+        Serial.println("DS1307 read error!  Please check the circuitry.");
       }
     }
   }
 }
 
-void fsmTick(const short counter) {
-  short second = tm.Second/5;
-  short minute = tm.Minute/5;
-  short hour = tm.Hour < 12 ? tm.Hour : tm.Hour-12;;
+void stripRollingRainbow(void) {
+  for (byte i = 0; i < NUMLEDS; i++) {
+    //strip.setHSV(i, counter + i * (255 / NUMLEDS), 255, 255);
+    leds[i] = mHSV(counter + i * (255 / (NUMLEDS)), 255, 255);
+  }
+}
+void stripCircleRainbow(void) {
+  static short direction = 0;
+  static short color = 0;
+  //short pref = direction ? direction - counter : counter;
+  for (byte i = 0; i < NUMLEDS; i++) {
+    if (i * 21 < direction) {
+      leds[i] = mHSV(color * 43, 255, 255);
+    } else {
+      leds[i] = mRGB(0, 0, 0);
+    }
+  }
+  direction++;
+  //Serial.println(pref);
+  //delay(1);
+  if (counter == 255) {
+    direction = 0;
+    color++;
+    if (color > 5) {
+      color = 0;
+    }
+  }
+}
+void stripStaticRainbow(void) {
+  for (byte i = 0; i < NUMLEDS; i++) {
+    leds[i] = mHSV(counter + (255 / (NUMLEDS)), 255, 255);
+  }
+}
+void stripPulseRainbow(void) {
+  static short direction = 0;
+  static short color = 0;
+  short pref = direction ? direction - counter : counter;
+  for (byte i = 0; i < NUMLEDS; i++) {
+    leds[i] = mHSV(color * 43, 255, pref);
+  }
+  //Serial.println(pref);
+  delay(1);
+  if (counter == 255) {
+    if (direction == 0) {
+      direction = 255;
+    } else {
+      direction = 0;
+      color++;
+      if (color > 5) {
+        color = 0;
+      }
+    }
+  }
+}
+void stripArrowDots(void) {
+  short minute = tm.Minute / 5;
+  short hour = tm.Hour < 12 ? tm.Hour : tm.Hour - 12;
+  ;
+  for (byte i = 0; i < NUMLEDS; i++) {
+    leds[i] = mRGB(0, 0, 0);
+  }
+  if (minute == hour) {
+    leds[minute] = mRGB(255, 0, 255);
+  } else {
+    leds[minute] = mRGB(255, 0, 0);
+    leds[hour] = mRGB(0, 0, 255);
+  }
+}
+void stripArrowOverlap(void) {
+  short second = tm.Second / 5;
+  short minute = tm.Minute / 5;
+  short hour = tm.Hour < 12 ? tm.Hour : tm.Hour - 12;
+  ;
   short minute_c;
   short hour_c;
-  if (ledMode < 6) {
-  switch (ledMode) {
-    case 1:  // Rolling rainbow
-      for (byte i = 0; i < NUMLEDS; i++) {
-        //strip.setHSV(i, counter + i * (255 / NUMLEDS), 255, 255);
-        leds[i] = mHSV(counter + i * (255 / (NUMLEDS)), 255, 255);
-      }
-      break;
-    case 2:  // Static rainbow
-      for (byte i = 0; i < NUMLEDS; i++) {
-        leds[i] = mHSV(counter + (255 / (NUMLEDS)), 255, 255);
-      }
-      break;
-    case 3:  // Dots Arrow
-      for (byte i = 0; i < NUMLEDS; i++) {
-        leds[i] = mRGB(0, 0, 0);
-      }
-      if (minute == hour) {
-        leds[minute] = mRGB(255, 0, 255);
-      } else {
-        leds[minute] = mRGB(255, 0, 0);
-        leds[hour] = mRGB(0, 0, 255);
-      }
-      break;
-    case 4:  // Line Arrow
-      minute_c = tm.Minute/5;
-      hour_c = 0;
-      for (int i = 0; i < NUMLEDS; i++) {
-        minute_c = minute > i ? 255 : 0;
-        hour_c = hour > i ? 255 : 0;
+  minute_c = tm.Minute / 5;
+  hour_c = 0;
+  for (int i = 0; i < NUMLEDS; i++) {
+    minute_c = minute > i ? 255 : 0;
+    hour_c = hour > i ? 255 : 0;
 
-        leds[i] = mRGB(minute_c, 0, hour_c);
-      }
-      break;
-    case 5:  // Line overlaped Arrow
-      minute_c = tm.Minute/5;
-      hour_c = 0;
-      short maximum = minute > hour ? minute : hour;
-      
-      for (int i = 0; i < NUMLEDS; i++) {
-        /*if (minute > hour) {
-          minute_c = 0;
-          hour_c = 255;
-        } else {
-          minute_c = 0;
-          hour_c = 255;
-        }*/
-        if (maximum > i) {
-          leds[i] = mRGB((hour_c-minute_c) < i ? 0: 255 *(hour_c-minute_c) , 0, (minute_c-hour_c) < i? 255 *(minute_c-hour_c):0);
-        } else {
-          leds[i] = mRGB(0, 0, 0);
-        }
-      }
-      break;
-    case 7:  // Line seconds
-      for (int i = 0; i < NUMLEDS; i++) {
-        if (i) {
-          leds[i] = mRGB(255, 255, 255);
-        } else {
-          leds[i] = mRGB(0, 0, 0);
-        }
-      }
-      break;
-    case 30:  // Static RED
-      for (int i = 0; i < NUMLEDS; i++) {
-        leds[i] = mRGB(255, 0, 0);
-      }
-      break;
+    leds[i] = mRGB(minute_c, 0, hour_c);
   }
-  } else {
-    switch (ledMode) {
-    case 6:  // Line seconds
-      for (int i = 0; i < NUMLEDS; i++) {
-        if (i) {
-          leds[i] = mRGB(255, 255, 255);
-        } else {
-          leds[i] = mRGB(0, 0, 0);
-        }
-      }
-      break;
-    case 30:  // Static RED
-      for (int i = 0; i <= NUMLEDS; i++) {
-        leds[i] = mRGB(255, 0, 0);
-      }
-      break;
+}
+void stripArrowDotsSec(void) {
+  short second = tm.Second / 5;
+  for (int i = 0; i < NUMLEDS; i++) {
+    if (i == second) {
+      leds[i] = mRGB(255, 125, 125);
+    } else {
+      leds[i] = mRGB(0, 0, 0);
+    }
   }
+}
+void stripArrowOverlapSec(void) {
+  short second = tm.Second / 5;
+  for (int i = 0; i < NUMLEDS; i++) {
+    if (i <= second ) {
+      leds[i] = mRGB(255, 25, 25);
+    } else {
+      leds[i] = mRGB(0, 0, 0);
+    }
   }
-
+}
+void stripStaticRED(void) {
+  for (int i = 0; i < NUMLEDS; i++) {
+    leds[i] = mRGB(255, 0, 0);
+  }
 }
 
 bool getTime(const char *str) {
