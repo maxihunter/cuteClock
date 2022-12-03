@@ -8,6 +8,10 @@ const char *monthName[12] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
+const byte sunrise_prerun[] = {15,30,60};
+const byte sunrise_multip[] = {17,8,4};
+
+void configMode(void);
 
 void stripRollingRainbow(void);
 void stripStaticRainbow(void);
@@ -19,17 +23,27 @@ void stripArrowDotsSec(void);
 void stripArrowOverlapSec(void);
 void stripStaticRED(void);
 
-int (*ledAction[10])(void);
+void stripSunrisemode(byte alarmMode);
+
+int (*ledAction[16])(void);
 
 tmElements_t tm;
 
 int eepromAddr = 0;
+byte oper_mode = 0;
 byte ledMode = 0;
+byte ledBrightness = 0;
 byte hsvMode = 0;
+// XXXX - byte data
+// 3210
+// 01 - normal alarm mode (0 - off, 1 - on LED, 2 - sound alarm)
+// 32 - sunrise mode (0 - off, othen prerun: 1 - 15 minute; 2 - 30 minutes; 3 - 60 minutes)
 byte hourAlarmMode = 0;
+byte sleep_hours = 0;
 byte alarm_hours = 0;
 byte alarm_minutes = 0;
 byte counter = 0;
+byte alarmMode = 0;
 
 // пример работы с лентой
 #define LED_PIN 4   // пин ленты
@@ -47,12 +61,16 @@ byte counter = 0;
 LEDdata leds[NUMLEDS];                   // буфер ленты типа LEDdata (размер зависит от COLOR_DEBTH)
 microLED strip(leds, NUMLEDS, LED_PIN);  // объект лента
 
-int8_t DispMSG[] = { 1, 2, 3, 4 };  // Настройка символов для последующего вывода на дислей
+int8_t DispMSG[] = { 0, 0, 0, 0 };  // Настройка символов для последующего вывода на дислей
 //Определяем пины для подключения к плате Arduino
 #define CLK 2
 #define DIO 3
 //Создаём объект класса TM1637, в качестве параметров
 //передаём номера пинов подключения
+
+#define BTN_CFG_BAT 2
+#define BTN_SNOOZE 3
+
 TM1637 tm1637(CLK, DIO);
 void setup() {
 
@@ -70,40 +88,27 @@ void setup() {
   ledMode = EEPROM.read(eepromAddr);
   hsvMode = EEPROM.read(eepromAddr+1);
   ledMode = 8;
-  Serial.begin(9600);
-  while (!Serial)
-    ;  // wait for Arduino Serial Monitor
-  delay(200);
-  //EEPROM.write(eepromAddr,1);
-  /*bool parse=false;
-  bool config=false;
+  
+  pinMode(BTN_CFG_BAT, INPUT);
+  pinMode(BTN_SNOOZE, INPUT);
 
-  // get the date and time the compiler was run
-  if (getDate(__DATE__) && getTime(__TIME__)) {
-    parse = true;
-    // and configure the RTC with this info
-    if (RTC.write(tm)) {
-      config = true;
-    }
+  if (digitalRead(buttonPin) == LOW) {
+    // enter config mode
+    //oper_mode = 1;
+    Serial.begin(9600);
+    while (!Serial) ;  // wait for Arduino Serial Monitor
+    delay(200);
+    configMode();
   }
-
-  if (parse && config) {
-    Serial.print("DS1307 configured Time=");
-    Serial.print(__TIME__);
-    Serial.print(", Date=");
-    Serial.println(__DATE__);
-  } else if (parse) {
-    Serial.println("DS1307 Communication Error :-{");
-    Serial.println("Please check your circuitry");
-  } else {
-    Serial.print("Could not parse info from the compiler, Time=\"");
-    Serial.print(__TIME__);
-    Serial.print("\", Date=\"");
-    Serial.print(__DATE__);
-    Serial.println("\"");
-  }*/
-
-
+  //EEPROM.write(eepromAddr,1);
+  alarmMode = (hourAlarmMode >> 2);
+  
+  /* // get the date and time the compiler was run
+  if (getDate(__DATE__) && getTime(__TIME__)) {
+    if (RTC.write(tm)) {
+      // error !!! config = true;
+    }
+  } */
 
   strip.setBrightness(20);  // яркость (0-255)
   // яркость применяется при выводе .show() !
@@ -122,6 +127,8 @@ void setup() {
   */
   tm1637.set(5);
   tm1637.display(DispMSG);
+  if (0 /* config button pressed */) {
+  }
 }
 void loop() {
 
@@ -137,6 +144,9 @@ void loop() {
     //fsmTick(counter);
     (*ledAction[ledMode - 1])();
     strip.show();
+  }
+  if (alarmMode) {
+    stripSunrisemode(alarmMode);
   }
   if (dots_counter > 50) {
     dots_counter = 0;
@@ -157,20 +167,6 @@ void loop() {
       }
       tm1637.display(DispMSG);
 
-      //Serial.print("Ok, getTime at counter = ");
-      //Serial.print(counter);
-      //Serial.println();
-      /*Serial.write(':');
-    print2digits(tm.Minute);
-    Serial.write(':');
-    print2digits(tm.Second);
-    Serial.print(", Date (D/M/Y) = ");
-    Serial.print(tm.Day);
-    Serial.write('/');
-    Serial.print(tm.Month);
-    Serial.write('/');
-    Serial.print(tmYearToCalendar(tm.Year));
-    Serial.println();*/
     } else {
       if (RTC.chipPresent()) {
         Serial.println("The DS1307 is stopped.  Please run the SetTime");
@@ -291,6 +287,24 @@ void stripStaticRED(void) {
   }
 }
 
+void stripSunrisemode(byte alarmMode) {
+  short minute = tm.Minute;
+  short hour = tm.Hour;
+  int current_time = (hour*60)+(minute);
+  int alarm_time = (alarm_hours*60)+(alarm_minutes);
+  // 76 - sunrise mode (0 - off, othen prerun: 1 - 15 minute; 2 - 30 minutes; 3 - 60 minutes)
+  // 76
+  // const byte sunrise_prerun[] = {15,30,60};
+  // const byte sunrise_multip[] = {17,8,4};
+  
+  if (current_time+sunrise_prerun[alarmMode] > alarm_time) {
+    short light = (current_time+sunrise_prerun[alarmMode] - alarm_time) * sunrise_multip[alarmMode];
+    for (int i = 0; i < NUMLEDS; i++) {
+      leds[i] = mRGB(light, light, light);
+    }
+  }
+}
+
 bool getTime(const char *str) {
   int Hour, Min, Sec;
 
@@ -322,4 +336,35 @@ void print2digits(int number) {
     Serial.write('0');
   }
   Serial.print(number);
+}
+
+void configMode(void) {
+  Serial.println("OK");
+  while(1) {
+    if (Serial.available() > 0) {  //если есть доступные данные
+        // считываем байт
+        incomingByte = Serial.read();
+ 
+        // отсылаем то, что получили
+        Serial.print("I received: ");
+        Serial.println(incomingByte, DEC);
+    }
+  }
+      //Serial.print("Ok, getTime at counter = ");
+      //Serial.print(counter);
+      //Serial.println();
+      //Serial.print("Ok, getTime at counter = ");
+      //Serial.print(counter);
+      //Serial.println();
+      /*Serial.write(':');
+    print2digits(tm.Minute);
+    Serial.write(':');
+    print2digits(tm.Second);
+    Serial.print(", Date (D/M/Y) = ");
+    Serial.print(tm.Day);
+    Serial.write('/');
+    Serial.print(tm.Month);
+    Serial.write('/');
+    Serial.print(tmYearToCalendar(tm.Year));
+    Serial.println();*/
 }
