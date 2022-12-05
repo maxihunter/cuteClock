@@ -8,8 +8,8 @@ const char *monthName[12] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
-const byte sunrise_prerun[] = {15,30,60};
-const byte sunrise_multip[] = {17,8,4};
+const byte sunrise_prerun[] = {/*15*/5,30,60};
+const byte sunrise_multip[] = {/*17*/50,8,4};
 
 void configMode(void);
 
@@ -21,6 +21,8 @@ void stripArrowDots(void);
 void stripArrowOverlap(void);
 void stripArrowDotsSec(void);
 void stripArrowOverlapSec(void);
+void stripStaticCustom(void);
+void stripPulseCustom(void);
 void stripStaticRED(void);
 
 void stripSunrisemode(byte alarmMode);
@@ -34,7 +36,7 @@ byte oper_mode = 0;
 byte ledMode = 0;
 byte ledBrightness = 0;
 byte hsvMode = 0;
-// XXXX - byte data
+// XXXX XXXX - byte data
 // 3210
 // 01 - normal alarm mode (0 - off, 1 - on LED, 2 - sound alarm)
 // 32 - sunrise mode (0 - off, othen prerun: 1 - 15 minute; 2 - 30 minutes; 3 - 60 minutes)
@@ -71,9 +73,10 @@ int8_t DispMSG[] = { 0, 0, 0, 0 };  // Настройка символов дл�
 #define BTN_CFG_BAT 2
 #define BTN_SNOOZE 3
 
+short cfg_bat_btn = 1;
+
 TM1637 tm1637(CLK, DIO);
 void setup() {
-
   ledAction[0] = stripRollingRainbow;
   ledAction[1] = stripStaticRainbow;
   ledAction[2] = stripCircleRainbow;
@@ -87,19 +90,14 @@ void setup() {
 
   ledMode = EEPROM.read(eepromAddr);
   hsvMode = EEPROM.read(eepromAddr+1);
+  hourAlarmMode = 4;
+  alarm_hours = 21;
+  alarm_minutes = 0;
   ledMode = 8;
   
-  pinMode(BTN_CFG_BAT, INPUT);
-  pinMode(BTN_SNOOZE, INPUT);
+  //pinMode(BTN_CFG_BAT, INPUT);
+  //pinMode(BTN_SNOOZE, INPUT);
 
-  if (digitalRead(buttonPin) == LOW) {
-    // enter config mode
-    //oper_mode = 1;
-    Serial.begin(9600);
-    while (!Serial) ;  // wait for Arduino Serial Monitor
-    delay(200);
-    configMode();
-  }
   //EEPROM.write(eepromAddr,1);
   alarmMode = (hourAlarmMode >> 2);
   
@@ -127,8 +125,20 @@ void setup() {
   */
   tm1637.set(5);
   tm1637.display(DispMSG);
-  if (0 /* config button pressed */) {
-  }
+  //cfg_bat_btn = digitalRead(BTN_CFG_BAT);
+
+  Serial.begin(9600);
+    while (!Serial) ;  // wait for Arduino Serial Monitor
+    delay(200);
+  /*if (cfg_bat_btn == LOW) {
+    // enter config mode
+    oper_mode = 1;
+    Serial.begin(9600);
+    while (!Serial) ;  // wait for Arduino Serial Monitor
+    delay(200);
+    configMode();
+  }*/
+  Serial.println("Ready");
 }
 void loop() {
 
@@ -140,14 +150,14 @@ void loop() {
   counter += 1;
   dots_counter += 1;
   // if ledMode is 0 - leds are disabled
-  if (ledMode) {
-    //fsmTick(counter);
+  if (alarmMode) {
+    stripSunrisemode(alarmMode);
+    strip.show();
+  } else if (ledMode) {
     (*ledAction[ledMode - 1])();
     strip.show();
   }
-  if (alarmMode) {
-    stripSunrisemode(alarmMode);
-  }
+  
   if (dots_counter > 50) {
     dots_counter = 0;
     if (RTC.read(tm)) {
@@ -281,6 +291,14 @@ void stripArrowOverlapSec(void) {
     }
   }
 }
+
+void stripStaticCustom(void) {
+
+};
+void stripPulseCustom(void) {
+
+};
+
 void stripStaticRED(void) {
   for (int i = 0; i < NUMLEDS; i++) {
     leds[i] = mRGB(255, 0, 0);
@@ -292,13 +310,15 @@ void stripSunrisemode(byte alarmMode) {
   short hour = tm.Hour;
   int current_time = (hour*60)+(minute);
   int alarm_time = (alarm_hours*60)+(alarm_minutes);
+    
   // 76 - sunrise mode (0 - off, othen prerun: 1 - 15 minute; 2 - 30 minutes; 3 - 60 minutes)
   // 76
   // const byte sunrise_prerun[] = {15,30,60};
   // const byte sunrise_multip[] = {17,8,4};
   
-  if (current_time+sunrise_prerun[alarmMode] > alarm_time) {
-    short light = (current_time+sunrise_prerun[alarmMode] - alarm_time) * sunrise_multip[alarmMode];
+  if (current_time+sunrise_prerun[alarmMode-1] > alarm_time) {
+    short light = (current_time+sunrise_prerun[alarmMode-1] - alarm_time) * sunrise_multip[alarmMode-1];
+    //Serial.println(light);
     for (int i = 0; i < NUMLEDS; i++) {
       leds[i] = mRGB(light, light, light);
     }
@@ -340,6 +360,7 @@ void print2digits(int number) {
 
 void configMode(void) {
   Serial.println("OK");
+  char incomingByte = 0;
   while(1) {
     if (Serial.available() > 0) {  //если есть доступные данные
         // считываем байт
