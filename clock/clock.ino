@@ -41,11 +41,13 @@ byte hsvMode = 0;
 // 01 - normal alarm mode (0 - off, 1 - on LED, 2 - sound alarm)
 // 32 - sunrise mode (0 - off, othen prerun: 1 - 15 minute; 2 - 30 minutes; 3 - 60 minutes)
 byte hourAlarmMode = 0;
-byte sleep_hours = 0;
+byte night_hours = 0;
 byte alarm_hours = 0;
 byte alarm_minutes = 0;
 byte counter = 0;
 byte alarmMode = 0;
+
+byte alarmState = 0;
 
 // пример работы с лентой
 #define LED_PIN 4   // пин ленты
@@ -63,15 +65,16 @@ byte alarmMode = 0;
 LEDdata leds[NUMLEDS];                   // буфер ленты типа LEDdata (размер зависит от COLOR_DEBTH)
 microLED strip(leds, NUMLEDS, LED_PIN);  // объект лента
 
-int8_t DispMSG[] = { 0, 0, 0, 0 };  // Настройка символов для последующего вывода на дислей
+int8_t DispMSG[] = { 0, 5, 0, 0 };  // Настройка символов для последующего вывода на дислей
 //Определяем пины для подключения к плате Arduino
 #define CLK 2
 #define DIO 3
 //Создаём объект класса TM1637, в качестве параметров
 //передаём номера пинов подключения
 
-#define BTN_CFG_BAT 2
-#define BTN_SNOOZE 3
+#define BTN_ALARM 10
+#define BTN_SNOOZE 11
+#define BTN_CFG_BAT 12
 
 short cfg_bat_btn = 1;
 
@@ -90,14 +93,12 @@ void setup() {
 
   ledMode = EEPROM.read(eepromAddr);
   hsvMode = EEPROM.read(eepromAddr+1);
-  hourAlarmMode = 4;
-  alarm_hours = 21;
+  hourAlarmMode = 12;
+  night_hours = 21;
+  alarm_hours = 8;
   alarm_minutes = 0;
-  ledMode = 8;
+  ledMode = 1;
   
-  //pinMode(BTN_CFG_BAT, INPUT);
-  //pinMode(BTN_SNOOZE, INPUT);
-
   //EEPROM.write(eepromAddr,1);
   alarmMode = (hourAlarmMode >> 2);
   
@@ -125,20 +126,21 @@ void setup() {
   */
   tm1637.set(5);
   tm1637.display(DispMSG);
-  //cfg_bat_btn = digitalRead(BTN_CFG_BAT);
+  
+  pinMode(BTN_CFG_BAT, INPUT_PULLUP);
+  pinMode(BTN_SNOOZE, INPUT_PULLUP);
 
-  Serial.begin(9600);
-    while (!Serial) ;  // wait for Arduino Serial Monitor
-    delay(200);
-  /*if (cfg_bat_btn == LOW) {
+  if (digitalRead(BTN_CFG_BAT) == LOW) {
     // enter config mode
     oper_mode = 1;
     Serial.begin(9600);
     while (!Serial) ;  // wait for Arduino Serial Monitor
     delay(200);
     configMode();
-  }*/
-  Serial.println("Ready");
+  }
+  RTC.read(tm);
+  tm.Hour = 5;
+  //Serial.println("Ready");
 }
 void loop() {
 
@@ -149,19 +151,43 @@ void loop() {
 
   counter += 1;
   dots_counter += 1;
+
+  time_t eapoch_sec = makeTime(tm);
+
+  if (digitalRead(BTN_ALARM) == LOW ) {
+    alarmMode |= 0x1;
+  }
   // if ledMode is 0 - leds are disabled
-  if (alarmMode) {
+  if (alarmMode && ((night_hours <= tm.Hour) ||
+           (alarm_hours >= tm.Hour && alarm_minutes >= tm.Minute))) {
+    if (alarm_hours == tm.Hour && alarm_minutes == tm.Minute) {
+      alarmState = 2;
+    }
     stripSunrisemode(alarmMode);
     strip.show();
   } else if (ledMode) {
     (*ledAction[ledMode - 1])();
     strip.show();
   }
-  
-  if (dots_counter > 50) {
-    dots_counter = 0;
-    if (RTC.read(tm)) {
 
+  if (digitalRead(BTN_SNOOZE) == LOW) {
+    // pressed snooze button in alarm mode
+    if (alarmState == 2) {
+      alarmState = 1;
+      alarm_minutes += 10;
+      if (alarm_minutes > 59) {
+        alarm_minutes -= 60;
+        alarm_hours++;
+        if (alarm_hours > 23) {
+          alarm_hours = 0;
+        }
+      }
+    }
+  }
+  
+  if (dots_counter > 20) {
+    dots_counter = 0;
+    if (/*RTC.read(tm)*/1) {
       tm1637.point(tm.Second % 2);
       DispMSG[3] = tm.Minute % 10;
       if (tm.Minute > 9) {
@@ -183,6 +209,15 @@ void loop() {
       } else {
         Serial.println("DS1307 read error!  Please check the circuitry.");
       }
+    }
+    tm.Minute++;
+  }
+  
+  if (tm.Minute == 60) {
+    tm.Minute = 0;
+    tm.Hour++;
+    if (tm.Hour == 24) {
+      tm.Hour = 0;
     }
   }
 }
@@ -318,7 +353,8 @@ void stripSunrisemode(byte alarmMode) {
   
   if (current_time+sunrise_prerun[alarmMode-1] > alarm_time) {
     short light = (current_time+sunrise_prerun[alarmMode-1] - alarm_time) * sunrise_multip[alarmMode-1];
-    //Serial.println(light);
+    if (light > 255)
+      light = 255;
     for (int i = 0; i < NUMLEDS; i++) {
       leds[i] = mRGB(light, light, light);
     }
