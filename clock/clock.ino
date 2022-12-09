@@ -12,7 +12,7 @@ enum operation_mode {
   m_end
 };
 
-const char *monthName[12] = {
+const char* monthName[12] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
@@ -42,9 +42,9 @@ int (*ledAction[16])(void);
 tmElements_t tm;
 
 int eepromAddr = 0;
-byte oper_mode = 0; // 0 - normal mode
-                    // 1 set hours mode 
-                    // 2 set minutes mode
+byte oper_mode = 0;  // 0 - normal mode
+                     // 1 set hours mode
+                     // 2 set minutes mode
 byte ledMode = 0;
 byte ledBrightness = 0;
 byte hsvMode = 0;
@@ -151,8 +151,8 @@ void setup() {
   pinMode(BTN_SET, INPUT_PULLUP);
   RTC.read(tm);
 
-  if (1/*digitalRead(BTN_CFG_BAT) == LOW*/) {
-  //if (digitalRead(BTN_CFG_BAT) == LOW) {
+  if (1 /*digitalRead(BTN_CFG_BAT) == LOW*/) {
+    //if (digitalRead(BTN_CFG_BAT) == LOW) {
     // enter config mode
     Serial.begin(9600);
     while (!Serial)
@@ -174,9 +174,9 @@ void setup() {
     configMode();
   }
   Serial.begin(9600);
-    while (!Serial)
-      ;  // wait for Arduino Serial Monitor
-    delay(200);
+  while (!Serial)
+    ;  // wait for Arduino Serial Monitor
+  delay(200);
 }
 void loop() {
 
@@ -207,8 +207,7 @@ void loop() {
   }
   if (btn_set && oper_mode != m_idle) {
     value_set++;
-    if ((oper_mode == m_hour_set && value_set > 23) ||
-        (oper_mode == m_minutes_set && value_set > 59)) {
+    if ((oper_mode == m_hour_set && value_set > 23) || (oper_mode == m_minutes_set && value_set > 59)) {
       value_set = 0;
     }
     counter = 0;
@@ -220,7 +219,7 @@ void loop() {
 
   counter += 1;
   dots_counter += 1;
-  
+
   alarm_time = (alarm_hours * 60) + alarm_minutes;
   int curr_minutes = (tm.Hour * 60) + tm.Minute;
 
@@ -267,11 +266,11 @@ void loop() {
   }
 
   if (oper_mode == m_hour_set) {
-    if (dots_counter%2) {
+    if (dots_counter % 2) {
       DispMSG[0] = 0x11;
       DispMSG[1] = 0x11;
     } else {
-       DispMSG[1] = value_set % 10;
+      DispMSG[1] = value_set % 10;
       if (value_set > 9) {
         DispMSG[0] = value_set / 10;
       } else {
@@ -283,11 +282,11 @@ void loop() {
     return;
   }
   if (oper_mode == m_minutes_set) {
-    if (dots_counter%2) {
+    if (dots_counter % 2) {
       DispMSG[2] = 0x11;
       DispMSG[3] = 0x11;
     } else {
-       DispMSG[3] = value_set % 10;
+      DispMSG[3] = value_set % 10;
       if (value_set > 9) {
         DispMSG[2] = value_set / 10;
       } else {
@@ -298,7 +297,7 @@ void loop() {
     delay(200);
     return;
   }
-    
+
   if (dots_counter > 20 && oper_mode == m_idle) {
     dots_counter = 0;
     if (RTC.read(tm)) {
@@ -325,15 +324,15 @@ void loop() {
       }
     }
   }
-}
-
-int readBtnStatus(void) {
-  int btn = !digitalRead(BTN_CFG_BAT);
-  btn |= (!digitalRead(BTN_CFG_BAT) < 1);
-  #define BTN_SET 9
-#define BTN_MODE 10
-#define BTN_SNOOZE 11
-#define BTN_CFG_BAT 12
+  if (tm.Minute == 0 && tm.Second == 0 && hourAlarmMode) {
+    if (hourAlarmMode == 1) {
+      dots_counter = 0;
+      hourAlarmMode = 2;
+    }
+    // TODO: do hourly alarm speaker or light
+  } else if (hourAlarmMode) {
+    hourAlarmMode = 1;
+  }
 }
 
 void stripRollingRainbow(void) {
@@ -439,12 +438,12 @@ void stripArrowOverlapSec(void) {
   }
 }
 
-void stripStaticCustom(void){
+void stripStaticCustom(void) {
   for (byte i = 0; i < NUMLEDS; i++) {
     leds[i] = mHSV(hsvMode, 255, 255);
   }
 };
-void stripPulseCustom(void){
+void stripPulseCustom(void) {
   static short direction = 0;
   short pref = direction ? direction - counter : counter;
   for (byte i = 0; i < NUMLEDS; i++) {
@@ -494,7 +493,7 @@ void handleAlarm(void) {
   // run alarmMode sound;;;
 }
 
-bool getTime(const char *str) {
+bool getTime(const char* str) {
   int Hour, Min, Sec;
 
   if (sscanf(str, "%d:%d:%d", &Hour, &Min, &Sec) != 3) return false;
@@ -504,7 +503,7 @@ bool getTime(const char *str) {
   return true;
 }
 
-bool getDate(const char *str) {
+bool getDate(const char* str) {
   char Month[12];
   int Day, Year;
   uint8_t monthIndex;
@@ -531,142 +530,134 @@ void configMode(void) {
   Serial.println("OK");
   char incomingByte = 0;
   String input;
-  while(1) {
+  while (1) {
     if (Serial.available() > 0) {  //если есть доступные данные
-        // считываем байт
-        input = Serial.readString();
-		if (input.startsWith("T")) {
-			Serial.println("TESTOK");
-			continue;
-		}
-		if (input.startsWith("t=")) {
-			if (!(RTC.read(tm))) {
-				Serial.println("Error: RTC failed");
-				continue;
-			}
-			if (!getTime(input.c_str()+2)) {
-				Serial.println("Error: Wrong format");
-				continue;
-			}
-			if (RTC.write(tm)) {
-				Serial.println("Error: RTC failed");
-				continue;
-			}
-			Serial.println("OK");
-			continue;
-		}
-		if (input.startsWith("d=")) {
-			if (!(RTC.read(tm))) {
-				Serial.println("Error: RTC failed");
-				continue;
-			}
-			if (!getDate(input.c_str()+2)) {
-				Serial.println("Error: Wrong format");
-				continue;
-			}
-			if (RTC.write(tm)) {
-				Serial.println("Error: RTC failed");
-				continue;
-			}
-			Serial.println("OK");
-			continue;
-		}
-    // led mode
-		if (input.startsWith("l=") && input.length() > 3) {
-			char* val = input.c_str();
-      int led = atoi(val+2);
-			EEPROM.write(eepromAddr, led);
-      //Serial.print(led);
-			Serial.println("OK");
-			continue;
-		}
-		// HSV for custom color mode
-		if (input.startsWith("h=") && input.length() > 3) {
-			char* val = input.c_str();
-      int hsv = atoi(val+2);
-			EEPROM.write(eepromAddr+1, hsv);
-      Serial.print(hsv);
-			Serial.println("OK");
-			continue;
-		}
-    // Hourly beep
-    if (input.startsWith("b=") && input.length() > 3) {
-			char* val = input.c_str();
-      int beep = atoi(val+2);
-			EEPROM.write(eepromAddr+2, beep);
-      //Serial.print(led);
-			Serial.println("OK");
-			continue;
-		}
-    // night not disturb hours
-    if (input.startsWith("n=") && input.length() > 3) {
-			char* val = input.c_str();
-      int h_alarm = atoi(val+2);
-			EEPROM.write(eepromAddr+3, h_alarm);
-      //Serial.print(led);
-			Serial.println("OK");
-			continue;
-		}
-    // alarm hours
-    if (input.startsWith("A=") && input.length() > 3) {
-			char* val = input.c_str();
-      int al_h = atoi(val+2);
-			EEPROM.write(eepromAddr+4, al_h);
-      //Serial.print(led);
-			Serial.println("OK");
-			continue;
-		}
-    // alarm minutes
-    if (input.startsWith("a=") && input.length() > 3) {
-			char* val = input.c_str();
-      int al_m = atoi(val+2);
-			EEPROM.write(eepromAddr+5, al_m);
-      //Serial.print(led);
-			Serial.println("OK");
-			continue;
-		}
-    // 24 or 12 clock format
-    if (input.startsWith("t=") && input.length() > 3) {
-			char* val = input.c_str();
-      int time = atoi(val+2);
-			EEPROM.write(eepromAddr+6, time);
-      //Serial.print(led);
-			Serial.println("OK");
-			continue;
-		}
-    if (input.startsWith("R")) {
-      ledMode = EEPROM.read(eepromAddr);
-      hsvMode = EEPROM.read(eepromAddr + 1);
-      hourAlarmMode = EEPROM.read(eepromAddr + 2);
-      night_hours = EEPROM.read(eepromAddr + 3);
-      alarm_hours = EEPROM.read(eepromAddr + 4);
-      alarm_minutes = EEPROM.read(eepromAddr + 5);
-      time_format = EEPROM.read(eepromAddr + 6);
-			
-      //Serial.print(led);
-			Serial.println("OK");
-			continue;
-		}
-		
-/*byte ledMode = 0;
-byte ledBrightness = 0;
-byte hsvMode = 0;
-// XXXX XXXX - byte data
-// 3210
-// 01 - normal alarm mode (0 - off, 1 - on LED, 2 - sound alarm)
-// 32 - sunrise mode (0 - off, othen prerun: 1 - 15 minute; 2 - 30 minutes; 3 - 60 minutes)
-
-byte alarmMode = 0;*/
-        Serial.println("unknown command");
+      // считываем байт
+      input = Serial.readString();
+      if (input.startsWith("T")) {
+        Serial.println("TESTOK");
+        continue;
+      }
+      if (input.startsWith("t=")) {
+        if (!(RTC.read(tm))) {
+          Serial.println("Error: RTC failed");
+          continue;
+        }
+        if (!getTime(input.c_str() + 2)) {
+          Serial.println("Error: Wrong format");
+          continue;
+        }
+        if (RTC.write(tm)) {
+          Serial.println("Error: RTC failed");
+          continue;
+        }
+        Serial.println("OK");
+        continue;
+      }
+      if (input.startsWith("d=")) {
+        if (!(RTC.read(tm))) {
+          Serial.println("Error: RTC failed");
+          continue;
+        }
+        if (!getDate(input.c_str() + 2)) {
+          Serial.println("Error: Wrong format");
+          continue;
+        }
+        if (RTC.write(tm)) {
+          Serial.println("Error: RTC failed");
+          continue;
+        }
+        Serial.println("OK");
+        continue;
+      }
+      // led mode
+      if (input.startsWith("l=") && input.length() > 3) {
+        char* val = input.c_str();
+        int led = atoi(val + 2);
+        EEPROM.write(eepromAddr, led);
+        //Serial.print(led);
+        Serial.println("OK");
+        continue;
+      }
+      // HSV for custom color mode
+      if (input.startsWith("h=") && input.length() > 3) {
+        char* val = input.c_str();
+        int hsv = atoi(val + 2);
+        EEPROM.write(eepromAddr + 1, hsv);
+        Serial.print(hsv);
+        Serial.println("OK");
+        continue;
+      }
+      // Hourly beep
+      if (input.startsWith("b=") && input.length() > 3) {
+        char* val = input.c_str();
+        int beep = atoi(val + 2);
+        EEPROM.write(eepromAddr + 2, beep);
+        //Serial.print(led);
+        Serial.println("OK");
+        continue;
+      }
+      // night not disturb hours
+      if (input.startsWith("n=") && input.length() > 3) {
+        char* val = input.c_str();
+        int h_alarm = atoi(val + 2);
+        EEPROM.write(eepromAddr + 3, h_alarm);
+        //Serial.print(led);
+        Serial.println("OK");
+        continue;
+      }
+      // alarm hours
+      if (input.startsWith("A=") && input.length() > 3) {
+        char* val = input.c_str();
+        int al_h = atoi(val + 2);
+        EEPROM.write(eepromAddr + 4, al_h);
+        //Serial.print(led);
+        Serial.println("OK");
+        continue;
+      }
+      // alarm minutes
+      if (input.startsWith("a=") && input.length() > 3) {
+        char* val = input.c_str();
+        int al_m = atoi(val + 2);
+        EEPROM.write(eepromAddr + 5, al_m);
+        //Serial.print(led);
+        Serial.println("OK");
+        continue;
+      }
+      // 24 or 12 clock format
+      if (input.startsWith("m=") && input.length() > 3) {
+        char* val = input.c_str();
+        int time = atoi(val + 2);
+        EEPROM.write(eepromAddr + 6, time);
+        //Serial.print(led);
+        Serial.println("OK");
+        continue;
+      }
+      if (input.startsWith("R")) {
+        ledMode = EEPROM.read(eepromAddr);
+        hsvMode = EEPROM.read(eepromAddr + 1);
+        hourAlarmMode = EEPROM.read(eepromAddr + 2);
+        night_hours = EEPROM.read(eepromAddr + 3);
+        alarm_hours = EEPROM.read(eepromAddr + 4);
+        alarm_minutes = EEPROM.read(eepromAddr + 5);
+        time_format = EEPROM.read(eepromAddr + 6);
+        char buf[256] = {};
+        snprintf(buf, 256, "ROK:l=%d;h=%d;b=%;n=%d;A=%d;a=%d;n=%d;t=%d;t=%d:%d:%d;d=%d.%d.%d;",
+                 ledMode, hsvMode, hourAlarmMode, night_hours, alarm_hours, alarm_minutes,
+                 time_format, tm.Hour, tm.Minute, tm.Second, tm.Day, tm.Month, tm.Year);
+        Serial.println(buf);
+        continue;
+      }
+      Serial.println("unknown command");
     }
   }
-      //Serial.print("Ok, getTime at counter = ");
-      //Serial.print(counter);
-      //Serial.println();
-      //Serial.print("Ok, getTime at counter = ");
-      //Serial.print(counter);
-      //Serial.println();
-      /*Serial.write(':');
+  //Serial.print("Ok, getTime at counter = ");
+  //Serial.print(counter);
+  //Serial.println();
+  //Serial.print("Ok, getTime at counter = ");
+  //Serial.print(counter);
+  //Serial.println();
+  /*Serial.write(':');
     print2digits(tm.Minute);
     Serial.write(':');
     print2digits(tm.Second);
