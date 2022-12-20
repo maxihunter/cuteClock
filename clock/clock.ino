@@ -12,6 +12,9 @@ enum operation_mode {
   m_end
 };
 
+#define CLOCK_VERSION "1.0"
+#define CLOCK_REVISION "A"
+
 const char* monthName[12] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
@@ -531,10 +534,14 @@ void configMode(void) {
   String input;
   while (1) {
     if (Serial.available() > 0) {  //если есть доступные данные
-      // считываем байт
+      // считываем байт CLOCK_VERSION
       input = Serial.readString();
       if (input.startsWith("T")) {
         Serial.println("TESTOK");
+        continue;
+      }
+      if (input.startsWith("V")) {
+        Serial.println(CLOCK_VERSION "|" CLOCK_REVISION);
         continue;
       }
       if (input.startsWith("t=")) {
@@ -646,7 +653,8 @@ void configMode(void) {
                  time_format, tm.Hour, tm.Minute, tm.Second, tm.Day, tm.Month, tm.Year);
         Serial.println(buf);
         continue;
-      }
+      }      
+      
       Serial.println("unknown command");
     }
   }
