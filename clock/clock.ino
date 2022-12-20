@@ -16,8 +16,8 @@ const char* monthName[12] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
-const byte sunrise_prerun[] = { /*15*/ 5, 30, 60 };
-const byte sunrise_multip[] = { /*17*/ 50, 8, 4 };
+const byte sunrise_prerun[] = { 5, 30, 60 };
+const byte sunrise_multip[] = { 50, 8, 4 };
 
 void configMode(void);
 
@@ -413,7 +413,6 @@ void stripArrowOverlap(void) {
   for (int i = 0; i < NUMLEDS; i++) {
     minute_c = minute > i ? 255 : 0;
     hour_c = hour > i ? 255 : 0;
-
     leds[i] = mRGB(minute_c, 0, hour_c);
   }
 }
@@ -642,7 +641,7 @@ void configMode(void) {
         alarm_minutes = EEPROM.read(eepromAddr + 5);
         time_format = EEPROM.read(eepromAddr + 6);
         char buf[256] = {};
-        snprintf(buf, 256, "ROK:l=%d;h=%d;b=%;n=%d;A=%d;a=%d;n=%d;t=%d;t=%d:%d:%d;d=%d.%d.%d;",
+        snprintf(buf, 256, "ROK|l=%d;h=%d;b=%d;n=%d;A=%d;a=%d;m=%d;t=%d:%d:%d;d=%d.%d.%d;",
                  ledMode, hsvMode, hourAlarmMode, night_hours, alarm_hours, alarm_minutes,
                  time_format, tm.Hour, tm.Minute, tm.Second, tm.Day, tm.Month, tm.Year);
         Serial.println(buf);
