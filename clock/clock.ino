@@ -40,7 +40,8 @@ void stripSunrisemode(byte alarmMode, int curr_minutes, int alarm_time);
 void handleAlarm(void);
 
 int readBtnStatus(void);
-int (*ledAction[16])(void);
+#define EFFECTS_SIZE 10
+int (*ledAction[EFFECTS_SIZE])(void);
 
 tmElements_t tm;
 
@@ -116,19 +117,19 @@ void setup() {
   night_hours = 21;
   alarm_hours = 8;
   alarm_minutes = 0;
-  //ledMode = 3;
+  ledMode = 3;
 
   int alarm_time = 0;
 
   //EEPROM.write(eepromAddr,1);
   //alarmMode = (hourAlarmMode >> 2);
 
-  /* // get the date and time the compiler was run
-  if (getDate(__DATE__) && getTime(__TIME__)) {
+  // get the date and time the compiler was run
+  /*if (getDate(__DATE__) && getTime(__TIME__)) {
     if (RTC.write(tm)) {
       // error !!! config = true;
     }
-  } */
+  }*/
 
   strip.setBrightness(20);  // яркость (0-255)
   // яркость применяется при выводе .show() !
@@ -154,8 +155,8 @@ void setup() {
   pinMode(BTN_SET, INPUT_PULLUP);
   RTC.read(tm);
 
-  if (1 /*digitalRead(BTN_CFG_BAT) == LOW*/) {
-    //if (digitalRead(BTN_CFG_BAT) == LOW) {
+  //if (1 /*digitalRead(BTN_CFG_BAT) == LOW*/) {
+  if (digitalRead(BTN_CFG_BAT) == LOW) {
     // enter config mode
     Serial.begin(9600);
     while (!Serial)
@@ -180,19 +181,34 @@ void setup() {
   while (!Serial)
     ;  // wait for Arduino Serial Monitor
   delay(200);
+  Serial.begin(9600);
+  while (!Serial)
+    ;  // wait for Arduino Serial Monitor
+  delay(200);
+  Serial.println("Ready");
 }
+
 void loop() {
 
   static byte dots_counter = 0;
   static byte value_set = 0;
 
+  counter += 1;
+  dots_counter += 1;
+
   //BTN handling
+
   short btn_bat = !digitalRead(BTN_CFG_BAT);
   short btn_snooze = !digitalRead(BTN_SNOOZE);
   short btn_mode = !digitalRead(BTN_MODE);
   short btn_set = !digitalRead(BTN_SET);
+
   delay(1);
-  //Serial.println(ledMode);
+  Serial.println(ledMode);
+  Serial.print(btn_bat);
+  Serial.print(btn_snooze);
+  Serial.print(btn_mode);
+  Serial.println(btn_set);
   if (btn_mode) {
     counter = 0;
     if (!oper_mode || oper_mode == m_end) {
@@ -219,18 +235,15 @@ void loop() {
     Serial.println("MODE OFF");
     oper_mode = m_idle;
   }
-
-  counter += 1;
-  dots_counter += 1;
+  if (btn_snooze && alarmState == 2) {
+    alarmMode = 0;
+  }
 
   alarm_time = (alarm_hours * 60) + alarm_minutes;
   int curr_minutes = (tm.Hour * 60) + tm.Minute;
 
   if (alarm_time == curr_minutes && !alarmState) {
     alarmState = 2;
-  }
-  if (btn_snooze && alarmState == 2) {
-    alarmMode = 0;
   }
   if (alarmMode) {
     handleAlarm();
@@ -239,12 +252,12 @@ void loop() {
   if (alarmMode && (night_hours <= tm.Hour || alarm_time >= curr_minutes)) {
     stripSunrisemode(alarmMode, curr_minutes, alarm_time);
     strip.show();
-  } else if (ledMode) {
+  } else if (ledMode && ledMode < EFFECTS_SIZE) {
     (*ledAction[ledMode - 1])();
     strip.show();
   }
 
-  /*if (digitalRead(BTN_SNOOZE) == LOW) {
+  if (btn_snooze) {
     if (alarmState == 2) {
       alarmState = 1;
       alarm_minutes += 10;
@@ -256,7 +269,7 @@ void loop() {
         }
       }
     }
-  }*/
+  }
   if (oper_mode == m_batt_check) {
     DispMSG[0] = 0x11;
     DispMSG[1] = 0x11;
@@ -269,6 +282,12 @@ void loop() {
   }
 
   if (oper_mode == m_hour_set) {
+    DispMSG[3] = tm.Minute % 10;
+    if (tm.Minute > 9) {
+      DispMSG[2] = tm.Minute / 10;
+    } else {
+      DispMSG[2] = 0;
+    }
     if (dots_counter % 2) {
       DispMSG[0] = 0x11;
       DispMSG[1] = 0x11;
@@ -285,6 +304,12 @@ void loop() {
     return;
   }
   if (oper_mode == m_minutes_set) {
+    DispMSG[1] = tm.Hour % 10;
+    if (tm.Hour > 9) {
+      DispMSG[0] = tm.Hour / 10;
+    } else {
+      DispMSG[0] = 0;
+    }
     if (dots_counter % 2) {
       DispMSG[2] = 0x11;
       DispMSG[3] = 0x11;
@@ -327,6 +352,7 @@ void loop() {
       }
     }
   }
+  /*
   if (tm.Minute == 0 && tm.Second == 0 && hourAlarmMode) {
     if (hourAlarmMode == 1) {
       dots_counter = 0;
@@ -335,7 +361,7 @@ void loop() {
     // TODO: do hourly alarm speaker or light
   } else if (hourAlarmMode) {
     hourAlarmMode = 1;
-  }
+  }*/
 }
 
 void stripRollingRainbow(void) {
@@ -653,8 +679,8 @@ void configMode(void) {
                  time_format, tm.Hour, tm.Minute, tm.Second, tm.Day, tm.Month, tm.Year);
         Serial.println(buf);
         continue;
-      }      
-      
+      }
+
       Serial.println("unknown command");
     }
   }
