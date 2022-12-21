@@ -15,6 +15,9 @@ enum operation_mode {
 #define CLOCK_VERSION "1.0"
 #define CLOCK_REVISION "A"
 
+#define RTC_STOPPED "RTC is stopped"
+#define RTC_FAILURE "RTC read error"
+
 const char* monthName[12] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
@@ -37,7 +40,7 @@ void stripPulseCustom(void);
 void stripStaticRED(void);
 
 void stripSunrisemode(byte alarmMode, int curr_minutes, int alarm_time);
-void handleAlarm(void);
+void handleAlarm(int curr_minutes);
 
 int readBtnStatus(void);
 #define EFFECTS_SIZE 10
@@ -45,6 +48,7 @@ int (*ledAction[EFFECTS_SIZE])(void);
 
 tmElements_t tm;
 
+/* Configuration variables */
 int eepromAddr = 0;
 byte oper_mode = 0;  // 0 - normal mode
                      // 1 set hours mode
@@ -62,6 +66,7 @@ byte alarm_hours = 0;
 byte alarm_minutes = 0;
 byte time_format = 0;
 
+/* Runtime state variables */
 byte counter = 0;
 byte alarmMode = 0;
 int alarm_time = 0;
@@ -95,6 +100,7 @@ int8_t DispMSG[] = { 0, 5, 0, 0 };  // Настройка символов дл�
 #define BTN_MODE 10
 #define BTN_SNOOZE 11
 #define BTN_CFG_BAT 12
+#define SPEAKER_PIN 6
 
 short cfg_bat_btn = 1;
 
@@ -113,16 +119,22 @@ void setup() {
 
   ledMode = EEPROM.read(eepromAddr);
   hsvMode = EEPROM.read(eepromAddr + 1);
+  hourAlarmMode = EEPROM.read(eepromAddr + 2);
+  night_hours = EEPROM.read(eepromAddr + 3);
+  alarm_hours = EEPROM.read(eepromAddr + 4);
+  alarm_minutes = EEPROM.read(eepromAddr + 5);
+  time_format = EEPROM.read(eepromAddr + 6);
+
   hourAlarmMode = 12;
   night_hours = 21;
   alarm_hours = 8;
   alarm_minutes = 0;
   ledMode = 3;
 
-  int alarm_time = 0;
+  int alarm_time = alarm_time = (alarm_hours * 60) + alarm_minutes;
 
   //EEPROM.write(eepromAddr,1);
-  //alarmMode = (hourAlarmMode >> 2);
+  alarmMode = (hourAlarmMode >> 2);
 
   // get the date and time the compiler was run
   /*if (getDate(__DATE__) && getTime(__TIME__)) {
@@ -155,8 +167,8 @@ void setup() {
   pinMode(BTN_SET, INPUT_PULLUP);
   RTC.read(tm);
 
-  //if (1 /*digitalRead(BTN_CFG_BAT) == LOW*/) {
-  if (digitalRead(BTN_CFG_BAT) == LOW) {
+  if (1 /*digitalRead(BTN_CFG_BAT) == LOW*/) {
+    //if (digitalRead(BTN_CFG_BAT) == LOW) {
     // enter config mode
     Serial.begin(9600);
     while (!Serial)
@@ -181,43 +193,39 @@ void setup() {
   while (!Serial)
     ;  // wait for Arduino Serial Monitor
   delay(200);
-  Serial.begin(9600);
-  while (!Serial)
-    ;  // wait for Arduino Serial Monitor
-  delay(200);
   Serial.println("Ready");
 }
 
 void loop() {
-
+  // init local static variables for ticks counting
   static byte dots_counter = 0;
-  static byte value_set = 0;
-
+  static byte value_set = -1;
   counter += 1;
   dots_counter += 1;
 
   //BTN handling
-
   short btn_bat = !digitalRead(BTN_CFG_BAT);
   short btn_snooze = !digitalRead(BTN_SNOOZE);
   short btn_mode = !digitalRead(BTN_MODE);
   short btn_set = !digitalRead(BTN_SET);
 
+  // Buttons logic block
   delay(1);
-  Serial.println(ledMode);
-  Serial.print(btn_bat);
-  Serial.print(btn_snooze);
-  Serial.print(btn_mode);
-  Serial.println(btn_set);
   if (btn_mode) {
     counter = 0;
     if (!oper_mode || oper_mode == m_end) {
       oper_mode = m_hour_set;
+      if (value_set != -1) {
+        tm.Minute = value_set;
+      }
       value_set = tm.Hour;
     } else {
       oper_mode++;
     }
     if (oper_mode == m_minutes_set) {
+      if (value_set != -1) {
+        tm.Hour = value_set;
+      }
       value_set = tm.Minute;
     }
   }
@@ -231,45 +239,48 @@ void loop() {
     }
     counter = 0;
   }
+  // Quit setup clock mode if timeout was reached
   if (counter > 30 && oper_mode != m_idle) {
     Serial.println("MODE OFF");
+    alarm_time = alarm_time = (alarm_hours * 60) + alarm_minutes;
+    if (RTC.write(tm)) {
+      Serial.println("RTC write error!");
+    }
     oper_mode = m_idle;
   }
+  // Stop active alarm if snooze button was pressed
   if (btn_snooze && alarmState == 2) {
-    alarmMode = 0;
+    alarmState = 0;
+    analogWrite(SPEAKER_PIN, 0);
   }
 
-  alarm_time = (alarm_hours * 60) + alarm_minutes;
+  // Hourly beep block
+  if (alarmState == 2) {
+    if (dots_counter % 2) {
+      analogWrite(SPEAKER_PIN, 125);
+    } else {
+      analogWrite(SPEAKER_PIN, 0);
+    }
+    delay(100);
+  }
+
+  // Handle alarm
   int curr_minutes = (tm.Hour * 60) + tm.Minute;
-
-  if (alarm_time == curr_minutes && !alarmState) {
-    alarmState = 2;
-  }
-  if (alarmMode) {
-    handleAlarm();
+  if (hourAlarmMode) {
+    handleAlarm(curr_minutes);
   }
   // if ledMode is 0 - leds are disabled
+  // Handle sunrise mode - adjust WHITE LED brightness
+  // base on time to the alarm
   if (alarmMode && (night_hours <= tm.Hour || alarm_time >= curr_minutes)) {
     stripSunrisemode(alarmMode, curr_minutes, alarm_time);
     strip.show();
-  } else if (ledMode && ledMode < EFFECTS_SIZE) {
+  } else if (ledMode && ledMode <= EFFECTS_SIZE) {
     (*ledAction[ledMode - 1])();
     strip.show();
   }
 
-  if (btn_snooze) {
-    if (alarmState == 2) {
-      alarmState = 1;
-      alarm_minutes += 10;
-      if (alarm_minutes > 59) {
-        alarm_minutes -= 60;
-        alarm_hours++;
-        if (alarm_hours > 23) {
-          alarm_hours = 0;
-        }
-      }
-    }
-  }
+  // Show Battery power if battery button was pressed
   if (oper_mode == m_batt_check) {
     DispMSG[0] = 0x11;
     DispMSG[1] = 0x11;
@@ -281,6 +292,7 @@ void loop() {
     return;
   }
 
+  // Show clock setup cycle if mode button was pressed
   if (oper_mode == m_hour_set) {
     DispMSG[3] = tm.Minute % 10;
     if (tm.Minute > 9) {
@@ -326,6 +338,9 @@ void loop() {
     return;
   }
 
+  // TODO: Alarm setup cycle
+
+  // Show clock time on LED display
   if (dots_counter > 20 && oper_mode == m_idle) {
     dots_counter = 0;
     if (RTC.read(tm)) {
@@ -343,25 +358,14 @@ void loop() {
         DispMSG[0] = 0;
       }
       tm1637.display(DispMSG);
-
     } else {
       if (RTC.chipPresent()) {
-        Serial.println("The DS1307 is stopped.  Please run the SetTime");
+        Serial.println(RTC_STOPPED);
       } else {
-        Serial.println("DS1307 read error!  Please check the circuitry.");
+        Serial.println(RTC_FAILURE);
       }
     }
   }
-  /*
-  if (tm.Minute == 0 && tm.Second == 0 && hourAlarmMode) {
-    if (hourAlarmMode == 1) {
-      dots_counter = 0;
-      hourAlarmMode = 2;
-    }
-    // TODO: do hourly alarm speaker or light
-  } else if (hourAlarmMode) {
-    hourAlarmMode = 1;
-  }*/
 }
 
 void stripRollingRainbow(void) {
@@ -494,11 +498,6 @@ void stripStaticRED(void) {
 }
 
 void stripSunrisemode(byte alarmMode, int curr_minutes, int alarm_time) {
-  /*short minute = tm.Minute;
-  short hour = tm.Hour;
-  int current_time = (hour*60)+(minute);
-  int alarm_time = (alarm_hours*60)+(alarm_minutes);*/
-
   // 76 - sunrise mode (0 - off, othen prerun: 1 - 15 minute; 2 - 30 minutes; 3 - 60 minutes)
   // 76
   // const byte sunrise_prerun[] = {15,30,60};
@@ -517,8 +516,23 @@ void stripSunrisemode(byte alarmMode, int curr_minutes, int alarm_time) {
   }
 }
 
-void handleAlarm(void) {
-  // run alarmMode sound;;;
+void handleAlarm(int curr_minutes) {
+  if (alarm_time == curr_minutes && !alarmState) {
+    alarmState = 2;
+  }
+  if (tm.Minute == 0 && tm.Second == 0) {
+    // TODO: do hourly alarm speaker or light
+    if (alarmState == 0) {
+      analogWrite(SPEAKER_PIN, 125);
+      delay(100);
+      analogWrite(SPEAKER_PIN, 160);
+      delay(100);
+      analogWrite(SPEAKER_PIN, 0);
+      alarmState = 1;
+    }
+  } else {
+    alarmState = 0;
+  }
 }
 
 bool getTime(const char* str) {
@@ -559,8 +573,7 @@ void configMode(void) {
   char incomingByte = 0;
   String input;
   while (1) {
-    if (Serial.available() > 0) {  //если есть доступные данные
-      // считываем байт CLOCK_VERSION
+    if (Serial.available() > 0) {
       input = Serial.readString();
       if (input.startsWith("T")) {
         Serial.println("TESTOK");
@@ -666,13 +679,7 @@ void configMode(void) {
         continue;
       }
       if (input.startsWith("R")) {
-        ledMode = EEPROM.read(eepromAddr);
-        hsvMode = EEPROM.read(eepromAddr + 1);
-        hourAlarmMode = EEPROM.read(eepromAddr + 2);
-        night_hours = EEPROM.read(eepromAddr + 3);
-        alarm_hours = EEPROM.read(eepromAddr + 4);
-        alarm_minutes = EEPROM.read(eepromAddr + 5);
-        time_format = EEPROM.read(eepromAddr + 6);
+        RTC.read(tm);
         char buf[256] = {};
         snprintf(buf, 256, "ROK|l=%d;h=%d;b=%d;n=%d;A=%d;a=%d;m=%d;t=%d:%d:%d;d=%d.%d.%d;",
                  ledMode, hsvMode, hourAlarmMode, night_hours, alarm_hours, alarm_minutes,
@@ -680,25 +687,24 @@ void configMode(void) {
         Serial.println(buf);
         continue;
       }
-
+      if (input.startsWith("r")) {
+        if (!RTC.read(tm)) {
+          if (RTC.chipPresent()) {
+            Serial.println(RTC_STOPPED);
+          } else {
+            Serial.println(RTC_FAILURE);
+          }
+        } else {
+          Serial.println("OK");
+        }
+        continue;
+      }
       Serial.println("unknown command");
     }
   }
-  //Serial.print("Ok, getTime at counter = ");
-  //Serial.print(counter);
-  //Serial.println();
-  //Serial.print("Ok, getTime at counter = ");
-  //Serial.print(counter);
-  //Serial.println();
-  /*Serial.write(':');
-    print2digits(tm.Minute);
-    Serial.write(':');
-    print2digits(tm.Second);
-    Serial.print(", Date (D/M/Y) = ");
-    Serial.print(tm.Day);
-    Serial.write('/');
-    Serial.print(tm.Month);
-    Serial.write('/');
-    Serial.print(tmYearToCalendar(tm.Year));
-    Serial.println();*/
+  /* char buff[128] = {};
+  snprintf(buff, 128, "Now %d:%d:%d %d.%d.%d\n",
+            tm.Hour, tm.Minute, tm.Second, tm.Day, tm.Month, tmYearToCalendar(tm.Year));
+  Serial.println(buff);
+  */
 }
