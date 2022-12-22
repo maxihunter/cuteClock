@@ -13,7 +13,7 @@ enum operation_mode {
 };
 
 #define CLOCK_VERSION "1.0"
-#define CLOCK_REVISION "A"
+#define CLOCK_REVISION "1"
 
 #define RTC_STOPPED "RTC is stopped"
 #define RTC_FAILURE "RTC read error"
@@ -60,6 +60,7 @@ byte hsvMode = 0;
 // 3210
 // 01 - normal alarm mode (0 - off, 1 - on LED, 2 - sound alarm)
 // 32 - sunrise mode (0 - off, othen prerun: 1 - 15 minute; 2 - 30 minutes; 3 - 60 minutes)
+// 4  - hourly beep mode
 byte hourAlarmMode = 0;
 byte night_hours = 0;
 byte alarm_hours = 0;
@@ -124,14 +125,8 @@ void setup() {
   alarm_hours = EEPROM.read(eepromAddr + 4);
   alarm_minutes = EEPROM.read(eepromAddr + 5);
   time_format = EEPROM.read(eepromAddr + 6);
-
-  hourAlarmMode = 12;
-  night_hours = 21;
-  alarm_hours = 8;
-  alarm_minutes = 0;
-  ledMode = 3;
-
-  int alarm_time = alarm_time = (alarm_hours * 60) + alarm_minutes;
+  
+  alarm_time = (alarm_hours * 60) + alarm_minutes;
 
   //EEPROM.write(eepromAddr,1);
   alarmMode = (hourAlarmMode >> 2);
@@ -616,65 +611,68 @@ void configMode(void) {
         continue;
       }
       // led mode
-      if (input.startsWith("l=") && input.length() > 3) {
+      if (input.startsWith("l=") && input.length() > 2) {
         char* val = input.c_str();
         int led = atoi(val + 2);
+        if (led > EFFECTS_SIZE || led < 0)
+          led = 0;
         EEPROM.write(eepromAddr, led);
-        //Serial.print(led);
         Serial.println("OK");
         continue;
       }
       // HSV for custom color mode
-      if (input.startsWith("h=") && input.length() > 3) {
+      if (input.startsWith("h=") && input.length() > 2) {
         char* val = input.c_str();
         int hsv = atoi(val + 2);
+        if (hsv > 255 || hsv < 0)
+          hsv = 0;
         EEPROM.write(eepromAddr + 1, hsv);
-        Serial.print(hsv);
         Serial.println("OK");
         continue;
       }
       // Hourly beep
-      if (input.startsWith("b=") && input.length() > 3) {
+      if (input.startsWith("b=") && input.length() > 2) {
         char* val = input.c_str();
         int beep = atoi(val + 2);
-        EEPROM.write(eepromAddr + 2, beep);
-        //Serial.print(led);
+        EEPROM.write(eepromAddr + 2, beep ? 1 : 0);
         Serial.println("OK");
         continue;
       }
       // night not disturb hours
-      if (input.startsWith("n=") && input.length() > 3) {
+      if (input.startsWith("n=") && input.length() > 2) {
         char* val = input.c_str();
         int h_alarm = atoi(val + 2);
+        if (h_alarm > 255 || h_alarm < 0)
+          h_alarm = 0;
         EEPROM.write(eepromAddr + 3, h_alarm);
-        //Serial.print(led);
         Serial.println("OK");
         continue;
       }
       // alarm hours
-      if (input.startsWith("A=") && input.length() > 3) {
+      if (input.startsWith("A=") && input.length() > 2) {
         char* val = input.c_str();
         int al_h = atoi(val + 2);
+        if (al_h > 23 || al_h < 0)
+          al_h = 0;
         EEPROM.write(eepromAddr + 4, al_h);
-        //Serial.print(led);
         Serial.println("OK");
         continue;
       }
       // alarm minutes
-      if (input.startsWith("a=") && input.length() > 3) {
+      if (input.startsWith("a=") && input.length() > 2) {
         char* val = input.c_str();
         int al_m = atoi(val + 2);
+        if (al_m > 59 || al_m < 0)
+          al_m = 0;
         EEPROM.write(eepromAddr + 5, al_m);
-        //Serial.print(led);
         Serial.println("OK");
         continue;
       }
       // 24 or 12 clock format
-      if (input.startsWith("m=") && input.length() > 3) {
+      if (input.startsWith("m=") && input.length() > 2) {
         char* val = input.c_str();
         int time = atoi(val + 2);
-        EEPROM.write(eepromAddr + 6, time);
-        //Serial.print(led);
+        EEPROM.write(eepromAddr + 6, time ? 1 : 0);
         Serial.println("OK");
         continue;
       }
