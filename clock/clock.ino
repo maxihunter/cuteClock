@@ -18,6 +18,13 @@ enum operation_mode {
 #define RTC_STOPPED "RTC is stopped"
 #define RTC_FAILURE "RTC read error"
 
+#define ALARM_MODE_OFFSET 0x0
+#define ALARM_MODE_MASK 0x2
+#define SUNRISE_MODE_OFFSET 0x2
+#define SUNRISE_MODE_MASK 0x2
+#define BEEP_OFFSET 0x4
+#define BEEP_MASK 0x1
+
 const char* monthName[12] = {
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
@@ -70,32 +77,28 @@ byte time_format = 0;
 /* Runtime state variables */
 byte counter = 0;
 byte alarmMode = 0;
+byte sunriseAlarmMode = 0;
+byte beepMode = 0;
 int alarm_time = 0;
 byte alarmState = 0;
 
+#define LED_PIN 4   // Strip output pin
+#define NUMLEDS 12  // LED count
 
-// пример работы с лентой
-#define LED_PIN 4   // пин ленты
-#define NUMLEDS 12  // кол-во светодиодов
+#define ORDER_GRB  // Color order ORDER_GRB / ORDER_RGB / ORDER_BRG
 
-#define ORDER_GRB  // порядок цветов ORDER_GRB / ORDER_RGB / ORDER_BRG
+#define COLOR_DEBTH 2  // Color depth: 1, 2, 3 (in bytes)
 
-#define COLOR_DEBTH 2  // цветовая глубина: 1, 2, 3 (в байтах)
-// на меньшем цветовом разрешении скетч будет занимать в разы меньше места,
-// но уменьшится и количество оттенков и уровней яркости!
-
-// ВНИМАНИЕ! define настройки (ORDER_GRB и COLOR_DEBTH) делаются до подключения библиотеки!
+// Attention! define (ORDER_GRB and COLOR_DEBTH) need to do before attaching the lib
 #include <microLED.h>
 
-LEDdata leds[NUMLEDS];                   // буфер ленты типа LEDdata (размер зависит от COLOR_DEBTH)
-microLED strip(leds, NUMLEDS, LED_PIN);  // объект лента
+LEDdata leds[NUMLEDS];                   // LED buffer LEDdata
+microLED strip(leds, NUMLEDS, LED_PIN);  // Strp instance
 
-int8_t DispMSG[] = { 0, 5, 0, 0 };  // Настройка символов для последующего вывода на дислей
-//Определяем пины для подключения к плате Arduino
+int8_t DispMSG[] = { 0, 5, 0, 0 };  // LED Display buffer
+// Display connection pins
 #define CLK 2
 #define DIO 3
-//Создаём объект класса TM1637, в качестве параметров
-//передаём номера пинов подключения
 
 #define BTN_SET 9
 #define BTN_MODE 10
@@ -103,9 +106,8 @@ int8_t DispMSG[] = { 0, 5, 0, 0 };  // Настройка символов дл�
 #define BTN_CFG_BAT 12
 #define SPEAKER_PIN 6
 
-short cfg_bat_btn = 1;
-
 TM1637 tm1637(CLK, DIO);
+
 void setup() {
   ledAction[0] = stripRollingRainbow;
   ledAction[1] = stripStaticRainbow;
@@ -128,38 +130,41 @@ void setup() {
   
   alarm_time = (alarm_hours * 60) + alarm_minutes;
 
-  //EEPROM.write(eepromAddr,1);
-  alarmMode = (hourAlarmMode >> 2);
-
-  // get the date and time the compiler was run
-  /*if (getDate(__DATE__) && getTime(__TIME__)) {
+  alarmMode = (hourAlarmMode >> ALARM_MODE_OFFSET) & ALARM_MODE_MASK;
+  sunriseAlarmMode = (hourAlarmMode >> SUNRISE_MODE_OFFSET) & SUNRISE_MODE_MASK;
+  beepMode = (hourAlarmMode >> SUNRISE_MODE_OFFSET) & SUNRISE_MODE_MASK;
+  // Get the date and time the compiler was run
+  // For debug purpose, to set current time more easier
+#if 0
+  if (getDate(__DATE__) && getTime(__TIME__)) {
     if (RTC.write(tm)) {
       // error !!! config = true;
     }
-  }*/
-
-  strip.setBrightness(20);  // яркость (0-255)
-  // яркость применяется при выводе .show() !
-
-  strip.clear();  // очищает буфер
-  // применяется при выводе .show() !
-  strip.show();  // выводим изменения на ленту
-
-  //Инициализация модуля
+  }
+#endif
+  // Init LED display
   tm1637.init();
-  //Установка яркости горения сегментов
+  // Set LED brightness
   /*
-     BRIGHT_TYPICAL = 2 Средний
-     BRIGHT_DARKEST = 0 Тёмный
-     BRIGHTEST = 7      Яркий
+     BRIGHT_TYPICAL = 2 Medium
+     BRIGHT_DARKEST = 0 Darkest
+     BRIGHTEST = 7      Brightest
   */
   tm1637.set(5);
-  tm1637.display(DispMSG);
+  strip.setBrightness(20);  // Brightness (0-255)
 
+  strip.clear();  // Clear buffer
+
+  strip.show();  // выводим изменения на ленту
+  tm1637.display(DispMSG);
+  
+  // Buttons pin initialization
   pinMode(BTN_CFG_BAT, INPUT_PULLUP);
   pinMode(BTN_SNOOZE, INPUT_PULLUP);
   pinMode(BTN_MODE, INPUT_PULLUP);
   pinMode(BTN_SET, INPUT_PULLUP);
+  // Speaker pin initialization
+  pinMode(SPEAKER_PIN, OUTPUT);
   RTC.read(tm);
 
   if (1 /*digitalRead(BTN_CFG_BAT) == LOW*/) {
@@ -249,26 +254,16 @@ void loop() {
     analogWrite(SPEAKER_PIN, 0);
   }
 
-  // Hourly beep block
-  if (alarmState == 2) {
-    if (dots_counter % 2) {
-      analogWrite(SPEAKER_PIN, 125);
-    } else {
-      analogWrite(SPEAKER_PIN, 0);
-    }
-    delay(100);
-  }
-
   // Handle alarm
   int curr_minutes = (tm.Hour * 60) + tm.Minute;
-  if (hourAlarmMode) {
+  if (alarmMode) {
     handleAlarm(curr_minutes);
   }
   // if ledMode is 0 - leds are disabled
   // Handle sunrise mode - adjust WHITE LED brightness
   // base on time to the alarm
   if (alarmMode && (night_hours <= tm.Hour || alarm_time >= curr_minutes)) {
-    stripSunrisemode(alarmMode, curr_minutes, alarm_time);
+    stripSunrisemode(sunriseAlarmMode, curr_minutes, alarm_time);
     strip.show();
   } else if (ledMode && ledMode <= EFFECTS_SIZE) {
     (*ledAction[ledMode - 1])();
@@ -517,7 +512,7 @@ void handleAlarm(int curr_minutes) {
   }
   if (tm.Minute == 0 && tm.Second == 0) {
     // TODO: do hourly alarm speaker or light
-    if (alarmState == 0) {
+    if (alarmState == 0 && beepMode) {
       analogWrite(SPEAKER_PIN, 125);
       delay(100);
       analogWrite(SPEAKER_PIN, 160);
