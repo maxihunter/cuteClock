@@ -42,6 +42,7 @@ void stripArrowDots(void);
 void stripArrowOverlap(void);
 void stripArrowDotsSec(void);
 void stripArrowOverlapSec(void);
+void stripArrowOverlapSecRand(void);
 void stripStaticCustom(void);
 void stripPulseCustom(void);
 void stripStaticRED(void);
@@ -50,7 +51,7 @@ void stripSunrisemode(byte alarmMode, int curr_minutes, int alarm_time);
 void handleAlarm(int curr_minutes);
 
 int readBtnStatus(void);
-#define EFFECTS_SIZE 10
+#define EFFECTS_SIZE 12
 int (*ledAction[EFFECTS_SIZE])(void);
 
 tmElements_t tm;
@@ -82,6 +83,8 @@ byte beepMode = 0;
 int alarm_time = 0;
 byte alarmState = 0;
 
+byte dots_counter = 0;
+
 #define LED_PIN 4   // Strip output pin
 #define NUMLEDS 12  // LED count
 
@@ -100,13 +103,27 @@ int8_t DispMSG[] = { 0, 5, 0, 0 };  // LED Display buffer
 #define CLK 2
 #define DIO 3
 
-#define BTN_SET 9
-#define BTN_MODE 10
-#define BTN_SNOOZE 11
-#define BTN_CFG_BAT 12
+#define BTN_SET 9 // right
+#define BTN_MODE 10 // middle
+#define BTN_SNOOZE 11 // snooze
+#define BTN_CFG_BAT 8 // left
 #define SPEAKER_PIN 6
 
 TM1637 tm1637(CLK, DIO);
+
+// Define timer compare match register value
+int timer1_compare_match;
+  
+ISR(TIMER1_COMPA_vect)
+// Interrupt Service Routine for compare mode
+{
+  // Preload timer with compare match value
+  TCNT1 = timer1_compare_match;
+  
+  // Write opposite value to LED
+  //digitalWrite(ledPin, digitalRead(ledPin) ^ 1);
+  dots_counter = 1;
+}
 
 void setup() {
   ledAction[0] = stripRollingRainbow;
@@ -116,9 +133,11 @@ void setup() {
   ledAction[4] = stripArrowDots;
   ledAction[5] = stripArrowOverlap;
   ledAction[6] = stripArrowDotsSec;
-  ledAction[7] = stripArrowOverlapSec;
+  ledAction[7] = stripArrowOverlapSecRand;
   ledAction[8] = stripStaticCustom;
   ledAction[9] = stripPulseCustom;
+  ledAction[10] = stripArrowOverlapSec;
+  ledAction[11] = stripArrowOverlapSecRainbow;
 
   ledMode = EEPROM.read(eepromAddr);
   hsvMode = EEPROM.read(eepromAddr + 1);
@@ -127,12 +146,13 @@ void setup() {
   alarm_hours = EEPROM.read(eepromAddr + 4);
   alarm_minutes = EEPROM.read(eepromAddr + 5);
   time_format = EEPROM.read(eepromAddr + 6);
-  
-  alarm_time = (alarm_hours * 60) + alarm_minutes;
 
+  alarm_time = (alarm_hours * 60) + alarm_minutes;
+  night_hours = 23;
+  hourAlarmMode = 0x10; // beep only
   alarmMode = (hourAlarmMode >> ALARM_MODE_OFFSET) & ALARM_MODE_MASK;
   sunriseAlarmMode = (hourAlarmMode >> SUNRISE_MODE_OFFSET) & SUNRISE_MODE_MASK;
-  beepMode = (hourAlarmMode >> SUNRISE_MODE_OFFSET) & SUNRISE_MODE_MASK;
+  beepMode = (hourAlarmMode >> BEEP_OFFSET) & BEEP_MASK;
   // Get the date and time the compiler was run
   // For debug purpose, to set current time more easier
 #if 0
@@ -151,7 +171,7 @@ void setup() {
      BRIGHTEST = 7      Brightest
   */
   tm1637.set(5);
-  strip.setBrightness(20);  // Brightness (0-255)
+  strip.setBrightness(100);  // Brightness (0-255)
 
   strip.clear();  // Clear buffer
 
@@ -166,14 +186,25 @@ void setup() {
   // Speaker pin initialization
   pinMode(SPEAKER_PIN, OUTPUT);
   RTC.read(tm);
+  analogWrite(SPEAKER_PIN, 50);
+  delay(50);
+  analogWrite(SPEAKER_PIN, 0);
+  delay(50);
+  analogWrite(SPEAKER_PIN, 50);
+  delay(50);
+  //analogWrite(SPEAKER_PIN, 50);
+  //delay(100);
+  analogWrite(SPEAKER_PIN, 0);
 
-  if (1 /*digitalRead(BTN_CFG_BAT) == LOW*/) {
-    //if (digitalRead(BTN_CFG_BAT) == LOW) {
+  Serial.begin(9600);
+  while (!Serial)
+    ;  // wait for Arduino Serial Monitor
+  delay(200);
+  Serial.println("Ready");
+
+  //if (1 /*digitalRead(BTN_CFG_BAT) == LOW*/) {
+  if (digitalRead(BTN_CFG_BAT) == LOW) {
     // enter config mode
-    Serial.begin(9600);
-    while (!Serial)
-      ;  // wait for Arduino Serial Monitor
-    delay(200);
     for (int i = 0; i < NUMLEDS; i++) {
       leds[i] = mRGB(0, 0, 0);
     }
@@ -186,28 +217,50 @@ void setup() {
     DispMSG[2] = 0x10;
     DispMSG[3] = 0x10;
     tm1637.display(DispMSG);
-    Serial.println("Ready");
+    Serial.println("Enter config");
     configMode();
   }
-  Serial.begin(9600);
-  while (!Serial)
-    ;  // wait for Arduino Serial Monitor
-  delay(200);
-  Serial.println("Ready");
+  
+  // Disable all interrupts
+  noInterrupts();
+  // Initialize Timer1
+  TCCR1A = 0;
+  TCCR1B = 0;
+   // Set timer1_compare_match to the correct compare match register value
+  // 256 prescaler & 31246 compare match = 2Hz
+  timer1_compare_match = 21249;
+ 
+  // Preload timer with compare match value
+  TCNT1 = timer1_compare_match;
+ 
+  // Set prescaler to 256
+  TCCR1B |= (1 << CS12);
+ 
+  // Enable timer interrupt for compare mode
+  TIMSK1 |= (1 << OCIE1A);
+ 
+  // Enable all interrupts
+  interrupts();
 }
 
 void loop() {
   // init local static variables for ticks counting
-  static byte dots_counter = 0;
+  
   static byte value_set = -1;
+  static byte dots_flag = 0;
   counter += 1;
-  dots_counter += 1;
 
   //BTN handling
   short btn_bat = !digitalRead(BTN_CFG_BAT);
   short btn_snooze = !digitalRead(BTN_SNOOZE);
   short btn_mode = !digitalRead(BTN_MODE);
   short btn_set = !digitalRead(BTN_SET);
+
+  /*if (btn_bat || btn_snooze || btn_mode|| btn_set) {
+    char buf[256] = {};
+    snprintf(buf, 256, "BUUTTTT: |1=%d;2=%d;3=%d;4=%d;;", btn_bat, btn_snooze, btn_mode, btn_set);
+    Serial.println(buf);
+  }*/
 
   // Buttons logic block
   delay(1);
@@ -230,7 +283,13 @@ void loop() {
     }
   }
   if (btn_bat) {
-    oper_mode = m_batt_check;
+    ledMode++;
+    if (ledMode > EFFECTS_SIZE)
+      ledMode = 0;
+    
+    EEPROM.write(eepromAddr, ledMode);
+    delay(500);
+    //oper_mode = m_batt_check;
   }
   if (btn_set && oper_mode != m_idle) {
     value_set++;
@@ -256,7 +315,7 @@ void loop() {
 
   // Handle alarm
   int curr_minutes = (tm.Hour * 60) + tm.Minute;
-  if (alarmMode) {
+  if (alarmMode || beepMode) {
     handleAlarm(curr_minutes);
   }
   // if ledMode is 0 - leds are disabled
@@ -265,7 +324,9 @@ void loop() {
   if (alarmMode && (night_hours <= tm.Hour || alarm_time >= curr_minutes)) {
     stripSunrisemode(sunriseAlarmMode, curr_minutes, alarm_time);
     strip.show();
+    Serial.println("Sleep time!");
   } else if (ledMode && ledMode <= EFFECTS_SIZE) {
+    //Serial.println("Show strip!");
     (*ledAction[ledMode - 1])();
     strip.show();
   }
@@ -331,10 +392,12 @@ void loop() {
   // TODO: Alarm setup cycle
 
   // Show clock time on LED display
-  if (dots_counter > 20 && oper_mode == m_idle) {
+  if (dots_counter && oper_mode == m_idle) {
     dots_counter = 0;
+    dots_flag = !dots_flag;
+    tm1637.point(dots_flag);
     if (RTC.read(tm)) {
-      tm1637.point(tm.Second % 2);
+      //tm1637.point(tm.Second % 2);
       DispMSG[3] = tm.Minute % 10;
       if (tm.Minute > 9) {
         DispMSG[2] = tm.Minute / 10;
@@ -453,7 +516,40 @@ void stripArrowOverlapSec(void) {
   short second = tm.Second / 5;
   for (int i = 0; i < NUMLEDS; i++) {
     if (i <= second) {
-      leds[i] = mRGB(255, 25, 25);
+      leds[i] = mHSV(19+(4*tm.Second), 255, 255);
+    } else {
+      leds[i] = mRGB(0, 0, 0);
+    }
+  }
+}
+
+void stripArrowOverlapSecRainbow(void) {
+  short second = tm.Second / 5;
+  static short hue = 0;
+  static short counter = 0;
+  for (int i = 0; i < NUMLEDS; i++) {
+    if (i <= second) {
+      leds[i] = mHSV(hue, 255, 255);
+    } else {
+      leds[i] = mRGB(0, 0, 0);
+    }
+  }
+  counter++;
+  if (counter == 10) {
+    hue++;
+    counter = 0;
+  }
+}
+
+void stripArrowOverlapSecRand(void) {
+  short second = tm.Second / 5;
+  static short color = 0;
+  if (tm.Second == 0) {
+    color = random(0, 255);
+  }
+  for (int i = 0; i < NUMLEDS; i++) {
+    if (i <= second && tm.Second) {
+      leds[i] = mHSV(color, 255, 255);
     } else {
       leds[i] = mRGB(0, 0, 0);
     }
@@ -513,9 +609,11 @@ void handleAlarm(int curr_minutes) {
   if (tm.Minute == 0 && tm.Second == 0) {
     // TODO: do hourly alarm speaker or light
     if (alarmState == 0 && beepMode) {
-      analogWrite(SPEAKER_PIN, 125);
+      analogWrite(SPEAKER_PIN, 20);
       delay(100);
-      analogWrite(SPEAKER_PIN, 160);
+      analogWrite(SPEAKER_PIN, 0);
+      delay(100);
+      analogWrite(SPEAKER_PIN, 20);
       delay(100);
       analogWrite(SPEAKER_PIN, 0);
       alarmState = 1;
@@ -695,9 +793,9 @@ void configMode(void) {
       Serial.println("unknown command");
     }
   }
-  /* char buff[128] = {};
+   char buff[128] = {};
   snprintf(buff, 128, "Now %d:%d:%d %d.%d.%d\n",
             tm.Hour, tm.Minute, tm.Second, tm.Day, tm.Month, tmYearToCalendar(tm.Year));
   Serial.println(buff);
-  */
+  
 }
